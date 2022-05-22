@@ -1,0 +1,91 @@
+name: nodejs-app-deploy
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+  ci:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node: [14]
+    # env:
+    #   NODE_ENV: "development"
+
+
+    steps:
+      - name: Checkout 🛎
+        uses: actions/checkout@master
+      - name: Set env to dev
+        if: endsWith(github.ref, '/dev')
+        run: |
+          echo "application_name=dev-nodejs-app" >> $GITHUB_ENV
+          echo "environment_name=Devnodejsapp-env" >> $GITHUB_ENV
+          echo "NODE_ENV=development" >> $GITHUB_ENV
+
+      - name: Set env to production
+        if: endsWith(github.ref, '/main')
+        run: |
+          echo "application_name=nodejs-app" >> $GITHUB_ENV
+          echo "environment_name=Nodejsapp-env" >> $GITHUB_ENV
+          echo "NODE_ENV=production" >> $GITHUB_ENV
+      - name: Setup node env 🏗
+        uses: actions/setup-node@v2.1.2
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Cache node_modules 📦
+        uses: actions/cache@v2
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Installing NPM
+        run: npm install
+
+      # - name: Linting check
+      #   run: npm run lint
+
+      - name: Building application
+        run: npm build
+
+      - name: Generate deployment package
+        run: zip -r deploy.zip * .[^.]* -x "**node_modules**"
+
+      - name: Get timestamp
+        uses: gerred/actions/current-time@master
+        id: current-time
+
+      - name: Run string replace
+        uses: frabert/replace-string-action@master
+        id: format-time
+        with:
+          pattern: '[:\.]+'
+          string: "${{ steps.current-time.outputs.time }}"
+          replace-with: '-'
+          flags: 'g'
+
+      - name: Beanstalk Deploy for app
+        uses: einaregilsson/beanstalk-deploy@v16
+        with:
+          aws_access_key: ${{secrets.ACCESS_KEY_ID}}
+          aws_secret_key: ${{secrets.SECRET_ACCESS_KEY}}
+          application_name: ${{ env.application_name }}
+          environment_name: ${{ env.environment_name }}
+          region: us-east-2
+          version_label: "e-learn-${{ steps.format-time.outputs.replaced }}"
+          deployment_package: deploy.zip
+
+      - name: Deployed!
+        run: echo App deployed to ELB
